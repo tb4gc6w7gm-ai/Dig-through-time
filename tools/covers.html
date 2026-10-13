@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dig Through Time — covers</title>
+<style>
+  @font-face { font-family: 'PS2P'; src: url('../fonts/ps2p-latin.woff2') format('woff2'); }
+  body { margin: 0; background: #262b44; color: #fff; font: 14px sans-serif; padding: 16px; }
+  canvas { display: block; margin: 0 0 16px; max-width: 100%; image-rendering: pixelated; border: 1px solid #5a6988; }
+</style>
+</head>
+<body>
+<p id="status">Rendering…</p>
+<div id="out"></div>
+<script src="../src/data.js"></script>
+<script src="../src/art.js"></script>
+<script>
+// Обложки собираются из игровых спрайтов: art.js рисует в «заглушку» сцены Phaser.
+const store = {};
+const fakeScene = {
+  textures: {
+    addCanvas(k, c) { store[k] = c; return { add() {} }; },
+    createCanvas(k, w, h) {
+      const c = document.createElement('canvas'); c.width = w; c.height = h; store[k] = c;
+      return { add() {}, getContext: () => c.getContext('2d'), refresh() {} };
+    },
+    get(k) { const c = store[k]; return { getContext: () => c.getContext('2d'), refresh() {} }; },
+  },
+};
+DTT.Art.makeAll(fakeScene, { skin: 0, pick: 6 });
+
+const T = DTT.T;
+function tile(ctx, i, x, y) { ctx.drawImage(store.tiles, i * 18 + 1, 1, 16, 16, x, y, 16, 16); }
+function frame(ctx, key, f, fw, fh, x, y, flip) {
+  if (flip) { ctx.save(); ctx.translate(x + fw, y); ctx.scale(-1, 1); ctx.drawImage(store[key], f * fw, 0, fw, fh, 0, 0, fw, fh); ctx.restore(); }
+  else ctx.drawImage(store[key], f * fw, 0, fw, fh, x, y, fw, fh);
+}
+function img(ctx, key, x, yBottom) { const c = store[key]; ctx.drawImage(c, Math.round(x), Math.round(yBottom - c.height)); }
+
+// ---------- сцена-разрез ----------
+// L: { w, h, scale, ground (ряд травы), shaft (колонка), buildings: [[key, x]], title: {...} }
+function compose(L) {
+  const R = DTT.Art.rng(L.seed || 7);
+  const c = document.createElement('canvas'); c.width = L.w; c.height = L.h;
+  const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+  const cols = Math.ceil(L.w / 16) + 1;
+  const rows = Math.ceil(L.h / 16) + 1;
+  const G = L.ground;                      // ряд поверхности (в тайлах)
+  const depthRows = rows - G - 1;
+  const band = (k) => G + 1 + Math.round(depthRows * k);
+  const seamRow = band(0.42), clayRow = seamRow + 2, darkRow = band(0.74);
+
+  // небо полосами
+  const sky = ['#5ac8f0', '#6ccff2', '#7fd6f0', '#95def4', '#a8e6f8'];
+  const skyH = G * 16;
+  sky.forEach((col, i) => { g.fillStyle = col; g.fillRect(0, Math.floor(skyH * i / sky.length), L.w, Math.ceil(skyH / sky.length) + 1); });
+  (L.clouds || []).forEach(([x, y]) => g.drawImage(store.cloud, x, y));
+
+  // сетка тайлов: fg (блок или -1) и bg (стена)
+  const fg = [], bg = [];
+  for (let y = 0; y < rows; y++) {
+    fg.push([]); bg.push([]);
+    for (let x = 0; x < cols; x++) {
+      let t = -1, w = -1;
+      const wave = Math.round(Math.sin(x * 0.55 + y * 0.1) * 1.2);
+      const st = seamRow + Math.round(Math.sin(x * 0.2));   // шов — тонкая светящаяся линия
+      if (y === G) t = T.VGRASS;
+      else if (y > G) {
+        const yy = y + wave;
+        if (y < st && yy < band(0.1)) { t = T.DIRT; w = T.W_DIRT; }
+        else if (y < st) {
+          t = R() < 0.25 && yy > band(0.25) ? T.GRANITE : T.STONE; w = T.W_STONE;
+          const r = R();
+          if (r < 0.07) t = T.COAL; else if (r < 0.12) t = T.COPPER; else if (r < 0.15 && yy > band(0.2)) t = T.IRON;
+          else if (r < 0.17 && yy > band(0.32)) t = T.QUARTZ;
+        } else if (y === st) { t = T.SEAM; w = T.W_STONE; }
+        else if (yy < darkRow) {
+          t = T.CLAY; w = T.W_CLAY;
+          const r = R();
+          if (r < 0.07) t = T.SILVER; else if (r < 0.1 && yy > band(0.6)) t = T.GOLD;
+        } else {
+          t = T.DARK; w = T.W_DARK;
+          const r = R();
+          if (r < 0.06) t = T.GOLD; else if (r < 0.1) t = T.RUBY;
+        }
+      }
+      fg[y].push(t); bg[y].push(w);
+    }
+  }
+  const inside = (x, y) => y >= 0 && y < rows && x >= 0 && x < cols;
+  const setF = (x, y, v) => { if (inside(x, y)) fg[y][x] = v; };
+  const carve = (x, y, wall) => { if (inside(x, y)) { fg[y][x] = -1; if (wall != null) bg[y][x] = wall; } };
+
+  // ствол шахты от люка до шахтёра + боковой тоннель
+  const S = L.shaft, mRow = L.minerRow;
+  for (let y = G + 1; y <= mRow; y++) carve(S, y);
+  for (let x = S; x <= S + L.tunnel; x++) carve(x, mRow);
+  setF(S, G, T.HATCH);
+  const oreX = S + L.tunnel + 1;
+  setF(oreX, mRow, T.QUARTZ);
+
+  // средневековый зал с факелами
+  const room = L.room;
+  for (let y = room.y - 1; y <= room.y + 3; y++) for (let x = room.x - 1; x <= room.x + room.w; x++) {
+    if (!inside(x, y)) continue;
+    bg[y][x] = T.W_BRICK;
+    fg[y][x] = (y === room.y - 1 || y === room.y + 3 || x === room.x - 1 || x === room.x + room.w) ? T.BRICK : -1;
+  }
+  // пещера босса с лавой
+  const cave = L.cave;
+  for (let y = cave.y; y < cave.y + 4; y++) for (let x = cave.x; x < cave.x + cave.w; x++) carve(x, y);
+  for (let x = cave.x + cave.lava; x < cave.x + cave.w; x++) setF(x, cave.y + 4, T.LAVA);
+
+  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+    if (y > G && bg[y][x] >= 0) tile(g, bg[y][x], x * 16, y * 16);
+    if (fg[y][x] >= 0) tile(g, fg[y][x], x * 16, y * 16);
+  }
+
+  // деревня
+  const ground = G * 16;
+  L.buildings.forEach(([key, x]) => img(g, key, x, ground));
+  img(g, 'headframe', S * 16 + 8 - 24, ground);
+  (L.gnomes || []).forEach((x, i) => frame(g, 'gnome', i % 2, 16, 16, x, ground - 16, i % 2 === 0));
+
+  // факелы, шахтёр, враги
+  const lights = [];
+  const torch = (x, y) => { frame(g, 'torch', 0, 16, 16, x * 16, y * 16); lights.push([x * 16 + 8, y * 16 + 8, 34, 'torch']); };
+  for (let y = G + 4; y < mRow - 1; y += 5) torch(S, y);
+  torch(room.x + 1, room.y + 1); torch(room.x + room.w - 2, room.y + 1);
+  const mx = (S + L.tunnel) * 16, my = mRow * 16;
+  frame(g, 'miner', 4, 16, 16, mx, my);
+  lights.push([mx + 8, my + 8, L.lamp || 70, 'lamp']);
+  const kx = (cave.x + 1) * 16, ky = (cave.y + 4) * 16 - 32;
+  frame(g, 'ratking', 0, 32, 32, kx, ky);
+  frame(g, 'rat', 0, 16, 16, kx + 34, (cave.y + 3) * 16, true);
+  for (let x = cave.x + cave.lava; x < cave.x + cave.w; x++) lights.push([x * 16 + 8, (cave.y + 4) * 16 + 4, 30, 'lava']);
+  lights.push([kx + 16, ky + 16, 30, 'boss']);
+  for (let x = 0; x < cols; x += 2) lights.push([x * 16 + 8, (seamRow + 1) * 16, 26, 'seam']);
+
+  // темнота с глубиной + дырки света, со ступеньками как в игре
+  const dk = document.createElement('canvas'); dk.width = L.w; dk.height = L.h;
+  const d = dk.getContext('2d');
+  for (let y = 0; y < L.h; y++) {
+    const depth = (y - ground - 20) / (L.h - ground);
+    d.fillStyle = `rgba(14,10,24,${Math.max(0, Math.min(0.9, depth * 1.6))})`;
+    d.fillRect(0, y, L.w, 1);
+  }
+  d.globalCompositeOperation = 'destination-out';
+  lights.forEach(([x, y, r]) => {
+    const gr = d.createRadialGradient(x, y, 0, x, y, r);
+    gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(0.55, 'rgba(0,0,0,0.85)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    d.fillStyle = gr; d.fillRect(x - r, y - r, r * 2, r * 2);
+  });
+  const id = d.getImageData(0, 0, L.w, L.h);
+  for (let i = 3; i < id.data.length; i += 4) id.data[i] = Math.round(id.data[i] / 255 * 6) / 6 * 255;
+  d.putImageData(id, 0, 0);
+  g.drawImage(dk, 0, 0);
+  // тёплое свечение
+  g.globalCompositeOperation = 'lighter';
+  lights.forEach(([x, y, r, kind]) => {
+    const col = kind === 'lava' ? '247,118,34' : kind === 'seam' ? '254,174,52' : kind === 'boss' ? '228,59,68' : '254,231,97';
+    const a = kind === 'lamp' ? 0.18 : 0.12;
+    const gr = g.createRadialGradient(x, y, 0, x, y, r * 0.8);
+    gr.addColorStop(0, `rgba(${col},${a})`); gr.addColorStop(1, `rgba(${col},0)`);
+    g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2);
+  });
+  g.globalCompositeOperation = 'source-over';
+
+  // увеличение без сглаживания
+  const out = document.createElement('canvas');
+  out.width = L.w * L.scale; out.height = L.h * L.scale;
+  const o = out.getContext('2d'); o.imageSmoothingEnabled = false;
+  o.drawImage(c, 0, 0, out.width, out.height);
+
+  // название (единственный разрешённый текст)
+  const t = L.title;
+  o.textAlign = 'center'; o.textBaseline = 'top';
+  o.font = `${t.size}px PS2P`;
+  t.lines.forEach((line, i) => {
+    const x = t.x, y = t.y + i * t.size * 1.25;
+    const s = Math.round(t.size / 12);
+    o.fillStyle = '#181425';
+    for (let dx = -s; dx <= s; dx += s) for (let dy = -s; dy <= s * 3; dy += s) o.fillText(line, x + dx, y + dy);
+    o.fillStyle = '#be4a2f'; o.fillText(line, x + s, y + s * 2);
+    o.fillStyle = '#feae34'; o.fillText(line, x, y + s);
+    o.fillStyle = '#fee761'; o.fillText(line, x, y);
+  });
+  return out;
+}
+
+const LAYOUTS = {
+  'cover-landscape-1920x1080': {
+    w: 640, h: 360, scale: 3, ground: 8, shaft: 13, minerRow: 13, tunnel: 3, lamp: 70,
+    room: { x: 3, y: 18, w: 9 }, cave: { x: 25, y: 17, w: 11, lava: 5 },
+    clouds: [[30, 18], [430, 30], [600, 10]],
+    buildings: [['house2', 20], ['shop', 120], ['museum', 290], ['lodge', 370], ['tailor', 440], ['mill', 560]],
+    gnomes: [250, 266],
+    // левый верхний угол (40% × 20%) площадка закрывает значками — название справа
+    title: { lines: ['DIG THROUGH', 'TIME'], size: 80, x: 1400, y: 40 },
+  },
+  'cover-portrait-800x1200': {
+    w: 400, h: 600, scale: 2, ground: 13, shaft: 12, minerRow: 21, tunnel: 3, lamp: 70,
+    room: { x: 3, y: 28, w: 8 }, cave: { x: 12, y: 32, w: 12, lava: 6 },
+    clouds: [[300, 150], [20, 170]],
+    buildings: [['house1', 12], ['shop', 340]],
+    gnomes: [],
+    title: { lines: ['DIG', 'THROUGH', 'TIME'], size: 64, x: 560, y: 40 },
+  },
+  'cover-square-800x800': {
+    w: 400, h: 400, scale: 2, ground: 10, shaft: 12, minerRow: 15, tunnel: 3, lamp: 62,
+    room: { x: 1, y: 20, w: 7 }, cave: { x: 13, y: 19, w: 11, lava: 5 },
+    clouds: [],
+    buildings: [['house1', 20], ['shop', 330]],
+    gnomes: [],
+    title: { lines: ['DIG', 'THROUGH', 'TIME'], size: 56, x: 566, y: 24 },
+  },
+  'itch-cover-630x500': {
+    w: 315, h: 250, scale: 2, ground: 6, shaft: 3, minerRow: 9, tunnel: 4, lamp: 50,
+    room: { x: 10, y: 12, w: 6 }, cave: { x: 1, y: 11, w: 8, lava: 5 },
+    clouds: [[250, 70]],
+    buildings: [['house1', 90], ['shop', 252]],
+    gnomes: [],
+    title: { lines: ['DIG THROUGH', 'TIME'], size: 40, x: 315, y: 16 },
+  },
+};
+
+async function run() {
+  await document.fonts.load('80px PS2P', 'DIG');
+  const results = [];
+  for (const [name, L] of Object.entries(LAYOUTS)) {
+    const cv = compose(L);
+    document.getElementById('out').appendChild(cv);
+    const blob = await new Promise((r) => cv.toBlob(r, 'image/png'));
+    const dir = name.startsWith('itch') ? 'itch' : 'covers';
+    const res = await fetch(`../release/${dir}/${name}.png`, { method: 'PUT', body: blob });
+    results.push(`${name}: ${cv.width}x${cv.height} → ${res.status}`);
+  }
+  document.getElementById('status').textContent = results.join(' | ');
+  window.coversDone = results;
+}
+run();
+</script>
+</body>
+</html>

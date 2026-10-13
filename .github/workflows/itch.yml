@@ -1,0 +1,44 @@
+# При каждом push в main собирает игру и заливает её на itch.io через butler.
+# Нужен секрет BUTLER_API_KEY (Settings → Secrets and variables → Actions).
+name: Deploy to itch.io
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  ITCH_TARGET: pnthv/dig-through-time:html5
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build
+        run: bash tools/build.sh
+
+      - name: Install butler
+        run: |
+          curl -L -o butler.zip https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default
+          unzip -q butler.zip -d butler
+          chmod +x butler/butler
+          echo "$PWD/butler" >> "$GITHUB_PATH"
+
+      - name: Push to itch.io
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: butler push release/build "$ITCH_TARGET" --userversion "$(date +%Y.%m.%d)-${GITHUB_SHA::7}"
+
+      - name: Wait for itch.io to process the build
+        if: always()
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          for i in $(seq 1 30); do
+            out=$(butler status "$ITCH_TARGET")
+            echo "$out"
+            echo "$out" | grep -q -E "processing|waiting|started" || exit 0
+            sleep 10
+          done

@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Dig Through Time</title>
+<style>
+  @font-face {
+    font-family: 'PS2P';
+    src: url('fonts/ps2p-latin.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC;
+  }
+  @font-face {
+    font-family: 'PS2P';
+    src: url('fonts/ps2p-cyrillic.woff2') format('woff2');
+    unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+  }
+  :root {
+    --ink: #181425; --ink2: #262b44; --ink3: #3a4466; --stone: #5a6988; --stone2: #8b9bb4;
+    --paper: #ead4aa; --gold: #feae34; --gold2: #fee761; --red: #e43b44; --green: #63c74d; --white: #ffffff;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; }
+  body { font-family: 'PS2P', ui-monospace, monospace; color: var(--white); user-select: none; -webkit-user-select: none; touch-action: none; }
+  #game { position: fixed; inset: 0; }
+  #game canvas { display: block; image-rendering: pixelated; }
+  img, canvas { image-rendering: pixelated; }
+  [hidden] { display: none !important; }
+
+  /* ---------- HUD ---------- */
+  #hud { position: fixed; top: 10px; left: 10px; display: flex; gap: 6px; flex-wrap: wrap; align-content: flex-start; pointer-events: none; z-index: 10; max-width: calc(100% - 340px); }
+  .stat { display: flex; align-items: center; gap: 6px; background: rgba(24,20,37,.82); border: 2px solid var(--ink3); padding: 6px 8px; font-size: 10px; line-height: 1; }
+  .stat.warn { border-color: var(--red); color: var(--gold2); animation: blink .6s steps(2) infinite; }
+  @keyframes blink { 50% { border-color: var(--gold); } }
+  #hud-pick { width: 16px; height: 16px; margin: -3px 0; }
+  i.coin { display: inline-block; width: 10px; height: 10px; background: var(--gold); box-shadow: inset -2px -2px 0 #f77622, inset 2px 2px 0 var(--gold2); vertical-align: middle; flex: none; }
+  i.bagi { display: inline-block; width: 10px; height: 10px; background: #b86f50; box-shadow: inset -2px -2px 0 #733e39; }
+  i.torchi { display: inline-block; width: 4px; height: 10px; background: #733e39; box-shadow: 0 -3px 0 var(--gold); margin: 0 3px; }
+  i.deep { display: inline-block; width: 10px; height: 10px; background: var(--stone); box-shadow: inset 0 -4px 0 var(--ink3); }
+  i.lampi { display: inline-block; width: 12px; height: 14px; background: var(--gold2); box-shadow: inset 0 0 0 2px var(--ink3), 0 0 8px var(--gold); }
+  i.heart { display: inline-block; width: 10px; height: 9px; background: var(--red);
+    clip-path: polygon(0 20%, 20% 0, 40% 0, 50% 20%, 60% 0, 80% 0, 100% 20%, 100% 50%, 50% 100%, 0 50%); }
+  i.heart.empty { background: var(--ink3); }
+  #hud-hearts { display: flex; gap: 2px; }
+  i.gnome { display: inline-block; width: 12px; height: 16px; background: linear-gradient(var(--red) 0 40%, #e8b796 40% 55%, var(--white) 55% 75%, #124e89 75%); clip-path: polygon(50% 0, 100% 40%, 100% 100%, 0 100%, 0 40%); flex: none; }
+  i.gnome.off { opacity: .2; filter: grayscale(1); }
+  .ico { width: 24px; height: 24px; flex: none; }
+  .ico.big, i.big { transform: scale(1.4); margin: 0 4px; }
+
+  /* ---------- кнопки действий ---------- */
+  /* правая колонка: кнопки сверху на одном уровне с HUD, под ними карта */
+  #right { position: fixed; top: 10px; right: 10px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; z-index: 10; }
+  #actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .act { font: inherit; font-size: 9px; color: var(--white); background: var(--ink2); border: 2px solid var(--stone); padding: 7px 8px; cursor: pointer; display: flex; align-items: center; gap: 5px; box-shadow: 0 3px 0 var(--ink); }
+  .act:hover { border-color: var(--gold); }
+  .act:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
+  .act.dim { opacity: .45; }
+
+  /* ---------- мини-карта ---------- */
+  #minimap { position: relative; width: 132px; height: 170px; overflow: hidden; background: var(--ink); border: 2px solid var(--ink3); cursor: pointer; }
+  #minimap-canvas { position: absolute; left: 0; top: 0; display: block; transform-origin: 0 0; }
+  #minimap-dot { position: absolute; width: 4px; height: 4px; background: var(--gold2); box-shadow: 0 0 0 1px var(--ink), 0 0 6px var(--gold); }
+  #minimap:hover { border-color: var(--gold); }
+
+  /* ---------- подсказка у двери, тост, баннер, босс ---------- */
+  #prompt { position: fixed; left: 50%; bottom: 30px; transform: translateX(-50%); font: inherit; font-size: 11px; color: var(--ink); background: var(--gold2); border: 0; padding: 10px 14px; box-shadow: 0 4px 0 #f77622; cursor: pointer; z-index: 12; animation: bob 1s ease-in-out infinite; }
+  @keyframes bob { 50% { transform: translate(-50%, -3px); } }
+  #toast { position: fixed; left: 50%; top: 58px; transform: translate(-50%, -8px); max-width: min(560px, calc(100% - 180px)); background: rgba(24,20,37,.92); border: 2px solid var(--gold); padding: 10px 12px; font-size: 9px; line-height: 1.7; text-align: center; opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; z-index: 20; }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #banner { position: fixed; left: 0; right: 0; top: 34%; text-align: center; font-size: clamp(14px, 3.4vw, 26px); color: var(--gold2); text-shadow: 3px 3px 0 var(--ink), -2px -2px 0 var(--ink), 2px -2px 0 var(--ink), -2px 2px 0 var(--ink); opacity: 0; pointer-events: none; z-index: 20; padding: 0 16px; }
+  #banner.show { animation: banner 3.2s ease forwards; }
+  @keyframes banner { 0% { opacity: 0; transform: scale(1.3); } 12% { opacity: 1; transform: scale(1); } 80% { opacity: 1; } 100% { opacity: 0; } }
+  #bossbar { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(420px, calc(100% - 40px)); z-index: 11; text-align: center; font-size: 9px; color: var(--gold2); text-shadow: 2px 2px 0 var(--ink); }
+  #bossbar .track { height: 12px; margin-top: 6px; background: var(--ink); border: 2px solid var(--stone2); }
+  #bossbar-fill { height: 100%; background: var(--red); box-shadow: inset 0 -3px 0 #a22633; transition: width .15s; }
+
+  /* ---------- модалки ---------- */
+  #modal { position: fixed; inset: 0; background: rgba(24,20,37,.6); display: flex; align-items: center; justify-content: center; z-index: 30; padding: 16px; }
+  .panel { width: min(500px, 100%); max-height: 100%; overflow: auto; background: var(--ink2); border: 3px solid var(--stone2); box-shadow: 0 0 0 3px var(--ink), 6px 6px 0 3px rgba(0,0,0,.4); padding: 16px; font-size: 9px; line-height: 1.7; }
+  .panel h2 { font-size: 13px; margin: 0 0 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; color: var(--gold2); font-weight: normal; }
+  .panel h2.center { justify-content: center; text-align: center; }
+  .panel h3 { font-size: 9px; color: var(--stone2); margin: 14px 0 8px; font-weight: normal; }
+  .panel .coins { font-size: 10px; color: var(--white); display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+  .text { color: var(--paper); margin: 0 0 10px; }
+  .text.gold { color: var(--gold2); }
+  .text.small { font-size: 8px; color: var(--stone2); }
+  .center { text-align: center; justify-content: center; }
+  .muted { color: var(--stone); }
+  .row { display: flex; align-items: center; gap: 10px; padding: 10px; margin-bottom: 8px; background: var(--ink); border: 2px solid var(--ink3); }
+  .row.slim { padding: 6px 10px; margin-bottom: 6px; }
+  .row.gold-row { border-color: var(--gold); }
+  .row-main { flex: 1; min-width: 0; }
+  .row-main b { font-weight: normal; }
+  .row-main small { color: var(--gold); font-size: 8px; }
+  .row .stat { all: unset; display: block; color: var(--stone2); font-size: 8px; margin-top: 4px; }
+  .buy { font: inherit; font-size: 9px; color: var(--ink); background: var(--gold); border: 0; padding: 8px 10px; cursor: pointer; display: flex; gap: 5px; align-items: center; box-shadow: 0 3px 0 #be4a2f; white-space: nowrap; flex: none; }
+  .buy:active { transform: translateY(2px); box-shadow: 0 1px 0 #be4a2f; }
+  .buy.dim { background: var(--stone); box-shadow: 0 3px 0 var(--ink3); color: var(--ink2); }
+  .buy.ghost { background: var(--ink3); color: var(--white); box-shadow: 0 3px 0 var(--ink); }
+  .buy[disabled] { background: var(--ink3); color: var(--stone2); box-shadow: none; cursor: default; opacity: .7; }
+  .buy i.coin { width: 8px; height: 8px; }
+  .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
+  .foot.center { justify-content: center; }
+  .split { display: flex; gap: 8px; justify-content: space-between; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+  .close { font: inherit; font-size: 9px; color: var(--white); background: var(--ink3); border: 2px solid var(--stone2); padding: 8px 14px; cursor: pointer; }
+  .close:hover { border-color: var(--gold); }
+  .ok { color: var(--green); }
+  .warn-t { color: var(--red); }
+  .bar { height: 6px; background: var(--ink3); margin-top: 4px; }
+  .bar i { display: block; height: 100%; background: var(--green); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; }
+  .slot { font: inherit; font-size: 7px; line-height: 1.5; color: var(--stone2); background: var(--ink); border: 2px solid var(--ink3); padding: 8px 4px; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; }
+  .slot img { width: 32px; height: 32px; filter: brightness(0) opacity(.35); }
+  .slot.found { color: var(--white); border-color: var(--stone); }
+  .slot.found img { filter: none; }
+  .slot:hover, .slot.sel { border-color: var(--gold); }
+  .note { min-height: 20px; margin-top: 10px; color: var(--paper); }
+  .note p { margin: 4px 0 0; }
+  .note b { font-weight: normal; color: var(--gold2); }
+
+  .panel.artifact { text-align: center; border-color: var(--gold); }
+  .found-label { color: var(--gold); font-size: 9px; margin-bottom: 10px; }
+  .big-icon { width: 64px; height: 64px; display: block; margin: 0 auto 10px; animation: pop .5s ease; }
+  @keyframes pop { 0% { transform: scale(.2) rotate(-20deg); } 70% { transform: scale(1.15); } 100% { transform: scale(1); } }
+  .story { color: var(--paper); margin: 0 0 12px; }
+  .sub { color: var(--stone2); font-size: 8px; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
+  .card { background: var(--ink); border: 2px solid var(--ink3); padding: 10px 6px; display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 8px; text-align: center; }
+  .card.on { border-color: var(--gold); }
+  .card img { width: 48px; height: 48px; }
+
+  #interior { width: 100%; aspect-ratio: 192 / 108; display: block; border: 2px solid var(--ink); margin-bottom: 6px; }
+
+  .plots { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 6px; }
+  .plot { background: var(--ink); border: 2px solid var(--ink3); padding: 6px; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 8px; min-height: 84px; justify-content: center; }
+  .plot.ready { border-color: var(--green); }
+  .plot .bar { width: 100%; }
+  .plot small { color: var(--stone2); font-size: 7px; }
+  .plot-name { color: var(--paper); }
+  .seeds { display: flex; gap: 3px; }
+  .mini { font: inherit; font-size: 7px; color: var(--white); background: var(--ink3); border: 1px solid var(--stone); padding: 3px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .mini .ico { width: 18px; height: 18px; }
+  .mini:hover { border-color: var(--gold); }
+  .mini.dim { opacity: .5; }
+  .barn { display: flex; flex-wrap: wrap; gap: 6px; }
+  .barn-item { display: flex; align-items: center; gap: 4px; background: var(--ink); border: 2px solid var(--ink3); padding: 4px 8px 4px 4px; }
+  .barn-item.zero { opacity: .4; }
+  .barn-item .ico { width: 20px; height: 20px; }
+  .gnomes { display: flex; gap: 8px; justify-content: center; margin: 4px 0 12px; }
+
+  .menu-list { display: flex; flex-direction: column; gap: 8px; }
+  .big-btn { font: inherit; font-size: 11px; color: var(--ink); background: var(--gold); border: 0; padding: 12px 16px; cursor: pointer; box-shadow: 0 4px 0 #be4a2f; width: 100%; }
+  .big-btn.ghost { background: var(--ink3); color: var(--white); box-shadow: 0 4px 0 var(--ink); }
+  .big-btn.small { font-size: 9px; padding: 8px; width: auto; align-self: center; }
+  .big-btn:active { transform: translateY(2px); }
+  .menu-list .split .big-btn { flex: 1; width: auto; }
+  .vol { flex: 1; display: flex; align-items: center; gap: 10px; font-size: 10px; background: var(--ink3); padding: 10px 12px; box-shadow: 0 4px 0 var(--ink); }
+  .vol input { flex: 1; accent-color: var(--gold); cursor: pointer; }
+
+  .bigmap { position: relative; max-height: 60vh; overflow: auto; background: var(--ink); border: 2px solid var(--ink3); }
+  .bigmap img { display: block; width: 256px; margin: 0 auto; }
+  .bigmap .dot { position: absolute; width: 7px; height: 7px; background: var(--gold2); box-shadow: 0 0 0 2px var(--ink), 0 0 10px var(--gold); margin-left: calc(50% - 128px); }
+
+
+  /* ---------- сенсор ---------- */
+  #touch { display: none; }
+  body.touch #touch { display: block; }
+  .tbtn { position: fixed; bottom: calc(16px + env(safe-area-inset-bottom)); width: 64px; height: 64px; background: rgba(24,20,37,.55); border: 3px solid rgba(139,155,180,.7); color: var(--white); font: inherit; font-size: 18px; display: flex; align-items: center; justify-content: center; z-index: 10; touch-action: none; }
+  .tbtn.on { background: rgba(254,174,52,.45); border-color: var(--gold); }
+  .tbtn[data-touch=left] { left: 16px; }
+  .tbtn[data-touch=right] { left: 90px; }
+  .tbtn[data-touch=up] { right: 90px; }
+  .tbtn[data-touch=down] { right: 16px; }
+  body.touch #prompt { bottom: 100px; }
+  body.touch #bossbar { bottom: 96px; }
+
+  /* низкое окно (iframe 800×450 и меньше) — карта поменьше */
+  @media (max-height: 560px) {
+    #minimap { width: 96px; height: 110px; }
+  }
+  @media (max-width: 600px) {
+    #hud { max-width: calc(100% - 170px); }
+    #minimap { width: 70px; height: 96px; }
+    #toast { top: 96px; max-width: calc(100% - 100px); left: calc(50% - 40px); }
+    .act span { display: none; }
+    .act { padding: 8px; }
+    .stat { font-size: 9px; padding: 5px 6px; }
+  }
+</style>
+</head>
+<body>
+  <div id="game"></div>
+
+  <div id="hud">
+    <div class="stat"><span id="hud-hearts"></span></div>
+    <div class="stat"><i class="coin"></i><span id="hud-coins">0</span></div>
+    <div class="stat"><i class="deep"></i><span id="hud-depth">0 m</span></div>
+    <div class="stat" id="hud-bag-wrap"><i class="bagi"></i><span id="hud-bag">0/8</span></div>
+    <div class="stat"><i class="torchi"></i><span id="hud-torches">0</span></div>
+    <div class="stat"><img id="hud-pick" alt=""></div>
+  </div>
+
+  <div id="right">
+  <div id="actions">
+    <button class="act" id="btn-torch"><i class="torchi"></i><span>Torch</span></button>
+    <button class="act" id="btn-rope">↑<span>Rope up</span></button>
+    <button class="act" id="btn-map">▦<span>Map</span></button>
+    <button class="act" id="btn-menu">☰<span>Menu</span></button>
+  </div>
+
+  <div id="minimap"><canvas id="minimap-canvas"></canvas><i id="minimap-dot"></i></div>
+  </div>
+
+  <button id="prompt" hidden></button>
+  <div id="toast"></div>
+  <div id="banner"></div>
+  <div id="bossbar" hidden><span id="bossbar-name"></span><div class="track"><div id="bossbar-fill"></div></div></div>
+  <div id="modal" hidden><div class="panel" id="panel"></div></div>
+
+  <div id="touch">
+    <button class="tbtn" data-touch="left">◀</button>
+    <button class="tbtn" data-touch="right">▶</button>
+    <button class="tbtn" data-touch="up">▲</button>
+    <button class="tbtn" data-touch="down">⛏</button>
+  </div>
+
+  <script src="vendor/phaser.min.js"></script>
+  <script src="src/i18n.js?v=3"></script>
+  <script src="src/data.js?v=3"></script>
+  <script src="src/art.js?v=3"></script>
+  <script src="src/world.js?v=3"></script>
+  <script src="src/save.js?v=3"></script>
+  <script src="src/sfx.js?v=3"></script>
+  <script src="src/sim.js?v=3"></script>
+  <script src="src/ui.js?v=3"></script>
+  <script src="src/enemies.js?v=3"></script>
+  <script src="src/village.js?v=3"></script>
+  <script src="src/game.js?v=3"></script>
+</body>
+</html>
